@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 public class Game
@@ -19,11 +20,46 @@ public class Game
         ShowWorldGetReady();
         if (!StartGame()) return false;
 
-
-        await PlayAsync();
+        var cts = new CancellationTokenSource();
+        try
+        {
+            var inputTask = Task.Run(() => GetUserInput(cts), cts.Token);
+            await PlayAsync(cts.Token);
+            cts.Cancel();
+        }
+        catch (TaskCanceledException)
+        {
+        }
 
         return AskPlayAgain();
     }
+
+    private void GetUserInput(CancellationTokenSource cts)
+    {
+        while (!cts.IsCancellationRequested)
+        {
+            var key = Console.ReadKey(true).Key;
+            if (key is ConsoleKey.Escape)
+            {
+                cts.Cancel();
+                return;
+            }
+
+            var direction = key switch
+            {
+                ConsoleKey.UpArrow => Direction.Up,
+                ConsoleKey.DownArrow => Direction.Down,
+                ConsoleKey.LeftArrow => Direction.Left,
+                ConsoleKey.RightArrow => Direction.Right,
+                _ => Direction.None
+            };
+            if (direction != Direction.None)
+                AddDirection(direction);
+        }
+    }
+
+    private void AddDirection(Direction direction)
+        => _world.Directions.Enqueue(direction);
 
     private bool AskPlayAgain()
     {
@@ -31,9 +67,27 @@ public class Game
         return false;
     }
 
-    private async Task PlayAsync()
+    private async Task PlayAsync(CancellationToken token)
     {
-        // TODO: PlayAsync
+        var isGameOver = false;
+        while (!isGameOver)
+        {
+            if (token.IsCancellationRequested)
+                break;
+
+            _pacman.PacmanMove();
+            isGameOver = _world.UpdateScore(_pacman, _ghosts);
+
+            if (!isGameOver)
+            {
+                _ghosts.GhostsMoveAndScore();
+                isGameOver = _world.UpdateScore(_ghosts, _pacman);
+            }
+
+            await Task.Delay(100);  // 停 100 毫秒
+        }
+
+        _world.ShowGameOver();
     }
 
     private bool StartGame()
